@@ -1,0 +1,8 @@
+name: CI Frontend Cine
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGEN: ${{ secrets.DOCKER_USERNAME }}/front-cine:${{ github.sha }}
