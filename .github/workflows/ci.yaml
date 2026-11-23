@@ -87,7 +87,7 @@ http {
     server_name _;
 
     location / {
-      proxy_pass http://cine-front:80;
+      proxy_pass http://frontend-cine-prod:80;
       proxy_http_version 1.1;
       proxy_set_header Host $host;
       proxy_set_header X-Real-IP $remote_addr;
