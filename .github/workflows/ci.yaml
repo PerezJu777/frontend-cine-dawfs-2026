@@ -92,3 +92,104 @@ jobs:
 
             docker logout
             docker inspect -f '{{.State.Running}}' "$CONTENEDOR_FRONT" | grep -qx "true"
+
+  nginx:
+    needs: despliegue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar Nginx Proxy en el servidor por SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            CONTENEDOR_NGINX=nginx-prod
+            IMAGEN_NGINX=nginx:1.31.8
+            RED=cine-red
+
+            docker network inspect "$RED" >/dev/null 2>&1 || docker network create "$RED"
+
+            mkdir -p "$HOME/cine/nginx/sites-available" "$HOME/cine/nginx/sites-enabled"
+
+            cat << 'EOF' > "$HOME/cine/nginx/nginx.conf"
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+events {
+    worker_connections 1024;
+}
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    log_format main '$remote_addr - $remote_user [$time_local] "$request"'
+    '$status $body_bytes_sent "$http_referer"'
+    '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log /var/log/nginx/access.log main;
+    error_log /var/log/nginx/error.log notice;
+    sendfile    on;
+    keepalive_timeout   65;
+    include /etc/nginx/conf.d/*.conf;
+    include /etc/nginx/sites-enabled/*.conf;
+}
+EOF
+
+            cat << 'EOF' > "$HOME/cine/nginx/sites-available/cine-posgrado.bo.conf"
+server {
+    listen 80;
+    server_name cine-posgrado.bo;
+    index index.html index.htm index.nginx-debian.html;
+
+    location / {
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host $host;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+
+        proxy_pass http://frontend-cine-prod:8080;
+    }
+}
+EOF
+
+            cat << 'EOF' > "$HOME/cine/nginx/sites-available/api-cine-upea.bo.conf"
+server {
+    listen 80;
+    server_name api-cine-upea.bo;
+    index index.html index.htm index.nginx-debian.html;
+
+    location / {
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host $host;
+        proxy_pass http://api-cine-prod:3000;
+    }
+}
+EOF
+
+            ln -sf /etc/nginx/sites-available/cine-posgrado.bo.conf "$HOME/cine/nginx/sites-enabled/cine-posgrado.bo.conf"
+            ln -sf /etc/nginx/sites-available/api-cine-upea.bo.conf "$HOME/cine/nginx/sites-enabled/api-cine-upea.bo.conf"
+
+            docker pull "$IMAGEN_NGINX"
+
+            if docker ps -a --format '{{.Names}}' | grep -qx "$CONTENEDOR_NGINX"; then
+              docker stop "$CONTENEDOR_NGINX"
+              docker rm "$CONTENEDOR_NGINX"
+            fi
+
+            docker run -d \
+              --name "$CONTENEDOR_NGINX" \
+              --restart unless-stopped \
+              --network "$RED" \
+              -p 80:80 \
+              -v "$HOME/cine/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+              -v "$HOME/cine/nginx/sites-available:/etc/nginx/sites-available:ro" \
+              -v "$HOME/cine/nginx/sites-enabled:/etc/nginx/sites-enabled:ro" \
+              "$IMAGEN_NGINX"
+
+            docker inspect -f '{{.State.Running}}' "$CONTENEDOR_NGINX" | grep -qx "true"
+            docker exec "$CONTENEDOR_NGINX" nginx -t
