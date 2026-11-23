@@ -71,8 +71,10 @@ jobs:
 
             mkdir -p "$HOME/cine/nginx"
 
+            # Asegurar red compartida con api-cine-prod y postgres-cine-prod
             docker network inspect "$RED" >/dev/null 2>&1 || docker network create "$RED"
 
+            # Crear nginx.conf si aun no existe en el servidor
             if [ ! -f "$HOME/cine/nginx/nginx.conf" ]; then
               cat << 'EOF' > "$HOME/cine/nginx/nginx.conf"
 events {
@@ -112,6 +114,7 @@ EOF
             docker pull "$IMAGEN"
             docker pull "$IMAGEN_NGINX"
 
+            # Respaldar imagen previa del frontend si existe
             PREV_IMG=$(docker inspect -f '{{.Config.Image}}' "$CONTENEDOR_FRONT" 2>/dev/null || true)
             if [ -n "$PREV_IMG" ] && [ "$PREV_IMG" != "$IMAGEN" ] && docker image inspect "$PREV_IMG" >/dev/null 2>&1; then
               docker tag "$PREV_IMG" "${IMAGEN%:*}:previous" || true
@@ -143,6 +146,7 @@ EOF
 
             docker logout
 
+            # Verificar estado de contenedores y respuesta HTTP en puerto 80
             docker inspect -f '{{.State.Running}}' "$CONTENEDOR_FRONT" | grep -qx "true"
             docker inspect -f '{{.State.Running}}' "$CONTENEDOR_NGINX" | grep -qx "true"
             curl -fsS http://localhost:80 >/dev/null
