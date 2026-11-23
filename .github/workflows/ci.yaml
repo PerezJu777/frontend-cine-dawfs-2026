@@ -51,7 +51,7 @@ jobs:
     needs: docker
     runs-on: ubuntu-latest
     steps:
-      - name: Desplegar Frontend y Nginx en el servidor por SSH
+      - name: Desplegar Frontend en el servidor por SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
@@ -65,56 +65,15 @@ jobs:
           script: |
             set -e
             CONTENEDOR_FRONT=frontend-cine-prod
-            CONTENEDOR_NGINX=nginx-prod
-            IMAGEN_NGINX=nginx:alpine
             RED=cine-red
 
-            mkdir -p "$HOME/cine/nginx"
-
-            # Asegurar red compartida con api-cine-prod y postgres-cine-prod
             docker network inspect "$RED" >/dev/null 2>&1 || docker network create "$RED"
-
-            # Crear nginx.conf si aun no existe en el servidor
-            if [ ! -f "$HOME/cine/nginx/nginx.conf" ]; then
-              cat << 'EOF' > "$HOME/cine/nginx/nginx.conf"
-events {
-  worker_connections 1024;
-}
-
-http {
-  server {
-    listen 80;
-    server_name _;
-
-    location / {
-      proxy_pass http://frontend-cine-prod:80;
-      proxy_http_version 1.1;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /api/ {
-      proxy_pass http://api-cine-prod:3000/api/;
-      proxy_http_version 1.1;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
-  }
-}
-EOF
-            fi
 
             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-            echo "Descargando $IMAGEN y $IMAGEN_NGINX"
+            echo "Descargando $IMAGEN"
             docker pull "$IMAGEN"
-            docker pull "$IMAGEN_NGINX"
 
-            # Respaldar imagen previa del frontend si existe
             PREV_IMG=$(docker inspect -f '{{.Config.Image}}' "$CONTENEDOR_FRONT" 2>/dev/null || true)
             if [ -n "$PREV_IMG" ] && [ "$PREV_IMG" != "$IMAGEN" ] && docker image inspect "$PREV_IMG" >/dev/null 2>&1; then
               docker tag "$PREV_IMG" "${IMAGEN%:*}:previous" || true
@@ -131,22 +90,5 @@ EOF
               --network "$RED" \
               "$IMAGEN"
 
-            if docker ps -a --format '{{.Names}}' | grep -qx "$CONTENEDOR_NGINX"; then
-              docker stop "$CONTENEDOR_NGINX"
-              docker rm "$CONTENEDOR_NGINX"
-            fi
-
-            docker run -d \
-              --name "$CONTENEDOR_NGINX" \
-              --restart unless-stopped \
-              --network "$RED" \
-              -p 80:80 \
-              -v "$HOME/cine/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
-              "$IMAGEN_NGINX"
-
             docker logout
-
-            # Verificar estado de contenedores y respuesta HTTP en puerto 80
             docker inspect -f '{{.State.Running}}' "$CONTENEDOR_FRONT" | grep -qx "true"
-            docker inspect -f '{{.State.Running}}' "$CONTENEDOR_NGINX" | grep -qx "true"
-            curl -fsS http://localhost:80 >/dev/null
