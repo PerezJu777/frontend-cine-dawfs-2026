@@ -64,7 +64,7 @@ jobs:
           envs: IMAGEN,DOCKER_USERNAME,DOCKER_PASSWORD
           script: |
             set -e
-            CONTENEDOR_FRONT=cine-front
+            CONTENEDOR_FRONT=frontend-cine-prod
             CONTENEDOR_NGINX=nginx-prod
             IMAGEN_NGINX=nginx:alpine
             RED=cine-red
@@ -150,4 +150,3 @@ EOF
             docker inspect -f '{{.State.Running}}' "$CONTENEDOR_FRONT" | grep -qx "true"
             docker inspect -f '{{.State.Running}}' "$CONTENEDOR_NGINX" | grep -qx "true"
             curl -fsS http://localhost:80 >/dev/null
-            
